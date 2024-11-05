@@ -32,6 +32,7 @@ EthernetClient client;
 const int interruptPinPortA = 18; // Configuration de la broche de détection d'interruption pour le port A
 const int interruptPinPortB = 19; // Configuration de la broche de détection d'interruption pour le port B
 const int ledPin = A7;
+const int ledFlashPin = A15;
 
 const unsigned long debounceDelay = 50000; // Délai de détection anti-rebond en microsecondes
 
@@ -101,6 +102,7 @@ void setup() {
 
     // Configuration de la LED sur le GPIO analog A10
     pinMode(ledPin, OUTPUT);
+    pinMode(ledFlashPin, OUTPUT);
 }
 
 // Fonction pour transférer un message au client
@@ -134,10 +136,12 @@ void loop() {
 
         unsigned int i = 0;
         unsigned long previousMillis = 0;
+        unsigned long previousMillisLed = 0;
         const unsigned int interval = 1000;  // Intervalle de 1 seconde
 
         while (client.connected()) {
             unsigned long currentMillis = millis();
+            static bool tempoLed = false;
 
             // Envoi du message "Still alive" tous les intervalles
             if (currentMillis - previousMillis >= interval) {
@@ -149,6 +153,12 @@ void loop() {
 
                 mcp.read8(MCP23017_INTCAPA); // Lecture du registre d'interruption pour réinitialiser l'interruption sur le port A
                 mcp.read8(MCP23017_INTCAPB); // Port B
+            }
+
+            // LED allumée pendant 1 seconde si une interruption est détectée
+            if (tempoLed && currentMillis - previousMillisLed >= interval) {
+                digitalWrite(ledFlashPin, LOW);
+                tempoLed = false;
             }
 
             // Section critique pour vérifier et réinitialiser les interruptions
@@ -167,6 +177,9 @@ void loop() {
                 DEBUG_PRINTLN(interruptMessage);
 
                 digitalWrite(ledPin, mcp.digitalRead(PORTA, GP_pin_detected));
+                tempoLed = true;
+                previousMillisLed = currentMillis;
+                digitalWrite(ledFlashPin, HIGH);
             }
 
             // Si interruption détectée sur le port B
@@ -177,6 +190,9 @@ void loop() {
                 DEBUG_PRINTLN(interruptMessage);
 
                 digitalWrite(ledPin, mcp.digitalRead(PORTB, GP_pin_detected));
+                tempoLed = true;
+                previousMillisLed = currentMillis;
+                digitalWrite(ledFlashPin, HIGH);
             }
         }
 
