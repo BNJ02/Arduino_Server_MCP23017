@@ -134,10 +134,10 @@ void loop() {
     if (client) {
         DEBUG_PRINTLN("Nouveau client");
 
-        unsigned int i = 0;
+        unsigned long i = 0;
         unsigned long previousMillis = 0;
         unsigned long previousMillisLed = 0;
-        const unsigned int interval = 1000;  // Intervalle de 1 seconde
+        const unsigned int interval = 5;  // Intervalle de 1 seconde
 
         while (client.connected()) {
             unsigned long currentMillis = millis();
@@ -199,5 +199,60 @@ void loop() {
         // Déconnexion du client
         client.stop();
         DEBUG_PRINTLN("Client deconnecte");
+    } else {
+        DEBUG_PRINTLN("Sans client");
+
+        unsigned long previousMillis = 0;
+        unsigned long previousMillisLed = 0;
+        const unsigned int interval = 1000;  // Intervalle de 1 seconde
+
+        while (!client) {
+            unsigned long currentMillis = millis();
+            static bool tempoLed = false;
+
+            // Refresh tous les intervalles de temps
+            if (currentMillis - previousMillis >= interval) {
+                previousMillis = currentMillis;
+
+                mcp.read8(MCP23017_INTCAPA); // Lecture du registre d'interruption pour réinitialiser l'interruption sur le port A
+                mcp.read8(MCP23017_INTCAPB); // Port B
+            }
+
+            // LED allumée pendant 1 seconde si une interruption est détectée
+            if (tempoLed && currentMillis - previousMillisLed >= interval) {
+                digitalWrite(ledFlashPin, LOW);
+                tempoLed = false;
+            }
+
+            // Section critique pour vérifier et réinitialiser les interruptions
+            noInterrupts();  // Désactiver les interruptions
+            unsigned long localFlagPortA = interruptFlagPortA;
+            unsigned long localFlagPortB = interruptFlagPortB;
+            interruptFlagPortA = 0;  // Réinitialiser les drapeaux dans la section critique
+            interruptFlagPortB = 0;
+            interrupts();  // Réactiver les interruptions
+
+            // Si interruption détectée sur le port A
+            if (localFlagPortA) {
+                int8_t GP_pin_detected = mcp.getInterruptPin(PORTA);
+
+                digitalWrite(ledPin, mcp.digitalRead(PORTA, GP_pin_detected));
+                tempoLed = true;
+                previousMillisLed = currentMillis;
+                digitalWrite(ledFlashPin, HIGH);
+            }
+
+            // Si interruption détectée sur le port B
+            if (localFlagPortB) {
+                int8_t GP_pin_detected = mcp.getInterruptPin(PORTB);
+
+                digitalWrite(ledPin, mcp.digitalRead(PORTB, GP_pin_detected));
+                tempoLed = true;
+                previousMillisLed = currentMillis;
+                digitalWrite(ledFlashPin, HIGH);
+            }
+
+            client = server.available();
+        }
     }
 }
