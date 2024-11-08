@@ -34,12 +34,17 @@ const int interruptPinPortB = 19; // Configuration de la broche de détection d'
 const int ledPin = A7;
 const int ledFlashPin = A15;
 
+// Délais
 const unsigned long debounceDelay = 50000; // Délai de détection anti-rebond en microsecondes
+const unsigned int intervalRefresh = 1000; // en ms
+const unsigned int intervalFlashAndAlarm = 100; // en ms
 
-volatile unsigned long interruptFlagPortA = 0; // Flag pour indiquer un changement contenant la date de l'interruption
-volatile unsigned long interruptFlagPortB = 0; // Flag pour indiquer un changement contenant la date de l'interruption
+// Flags pour indiquer un changement contenant la date de l'interruption
+volatile unsigned long interruptFlagPortA = 0; // Port A
+volatile unsigned long interruptFlagPortB = 0; // Port B
 
-MCP23017 mcp; // Déclaration de mon composant MCP23017
+// Déclaration de mon composant MCP23017
+MCP23017 mcp; 
 
 // Déclaration de la fonction d'interruption pour le port A
 void handleInterruptPortA() {
@@ -129,71 +134,82 @@ void transfer_message (const String msg) {
     // DEBUG_PRINTLN(request);
 }
 
+// Fonction pour gérer l'activité client
+void handleClientAndInterrupts (const bool hasClient, unsigned long &i) {
+    unsigned long currentMillis = millis();
+    static unsigned long previousMillisFlashAndAlarm = 0;
+    static unsigned long previousMillisRefresh = 0;
+    static bool tempoLed = false;
+
+    // Envoi du message "Still alive" et refresh tous les intervalles
+    if (currentMillis - previousMillisRefresh >= intervalRefresh) {
+        previousMillisRefresh = currentMillis;
+        
+        if (hasClient) {
+            ++i;
+            String message = "Still ALIVE " + String(i) + "\t\t";
+            transfer_message(message);
+            DEBUG_PRINTLN(message);
+        }
+
+        mcp.read8(MCP23017_INTCAPA); // Lecture du registre d'interruption pour réinitialiser l'interruption sur le port A
+        mcp.read8(MCP23017_INTCAPB); // Port B
+    }
+
+    // LED allumée pendant 1 seconde si une interruption est détectée
+    if (tempoLed && currentMillis - previousMillisFlashAndAlarm >= intervalFlashAndAlarm) {
+        digitalWrite(ledFlashPin, LOW);
+        tempoLed = false;
+    }
+
+    // Section critique pour vérifier et réinitialiser les interruptions
+    noInterrupts();  // Désactiver les interruptions
+    unsigned long localFlagPortA = interruptFlagPortA;
+    unsigned long localFlagPortB = interruptFlagPortB;
+    interruptFlagPortA = 0;  // Réinitialiser les drapeaux dans la section critique
+    interruptFlagPortB = 0;
+    interrupts();  // Réactiver les interruptions
+
+    // Gestion des interruptions sur le port A
+    if (localFlagPortA) {
+        int8_t GP_pin_detected = mcp.getInterruptPin(PORTA);
+        if (hasClient) {
+            String interruptMessage = "GPIO" + String(GP_pin_detected) + " detected, delay : " + String(micros() - localFlagPortA) + " us";
+            transfer_message(interruptMessage);
+            DEBUG_PRINTLN(interruptMessage);
+        }
+        digitalWrite(ledPin, mcp.digitalRead(PORTA, GP_pin_detected));
+        tempoLed = true;
+        previousMillisFlashAndAlarm = currentMillis;
+        digitalWrite(ledFlashPin, HIGH);
+    }
+
+    // Gestion des interruptions sur le port B
+    if (localFlagPortB) {
+        int8_t GP_pin_detected = mcp.getInterruptPin(PORTB);
+        if (hasClient) {
+            String interruptMessage = "GPIO" + String(GP_pin_detected + 8) + " detected, delay : " + String(micros() - localFlagPortB) + " us";
+            transfer_message(interruptMessage);
+            DEBUG_PRINTLN(interruptMessage);
+        }
+        digitalWrite(ledPin, mcp.digitalRead(PORTB, GP_pin_detected));
+        tempoLed = true;
+        previousMillisFlashAndAlarm = currentMillis;
+        digitalWrite(ledFlashPin, HIGH);
+    }
+}
+
 void loop() {
+    unsigned long i = 0;
+
+    // Attente de la connexion d'un client
     client = server.available();
     if (client) {
         DEBUG_PRINTLN("Nouveau client");
 
-        unsigned long i = 0;
-        unsigned long previousMillis = 0;
-        unsigned long previousMillisLed = 0;
-        const unsigned int interval = 5;  // Intervalle de 1 seconde
-
+        // Tant qu'il y a un client, on gère le transfert de message sur le serveur
         while (client.connected()) {
-            unsigned long currentMillis = millis();
-            static bool tempoLed = false;
-
-            // Envoi du message "Still alive" tous les intervalles
-            if (currentMillis - previousMillis >= interval) {
-                previousMillis = currentMillis;
-                ++i;
-                String message = "Still ALIVE " + String(i) + "\t\t";
-                transfer_message(message);
-                DEBUG_PRINTLN(message);
-
-                mcp.read8(MCP23017_INTCAPA); // Lecture du registre d'interruption pour réinitialiser l'interruption sur le port A
-                mcp.read8(MCP23017_INTCAPB); // Port B
-            }
-
-            // LED allumée pendant 1 seconde si une interruption est détectée
-            if (tempoLed && currentMillis - previousMillisLed >= interval) {
-                digitalWrite(ledFlashPin, LOW);
-                tempoLed = false;
-            }
-
-            // Section critique pour vérifier et réinitialiser les interruptions
-            noInterrupts();  // Désactiver les interruptions
-            unsigned long localFlagPortA = interruptFlagPortA;
-            unsigned long localFlagPortB = interruptFlagPortB;
-            interruptFlagPortA = 0;  // Réinitialiser les drapeaux dans la section critique
-            interruptFlagPortB = 0;
-            interrupts();  // Réactiver les interruptions
-
-            // Si interruption détectée sur le port A
-            if (localFlagPortA) {
-                int8_t GP_pin_detected = mcp.getInterruptPin(PORTA);
-                String interruptMessage = "GPIO" + String(GP_pin_detected) + " detected, delay : " + String(micros() - localFlagPortA) + " us";
-                transfer_message(interruptMessage);
-                DEBUG_PRINTLN(interruptMessage);
-
-                digitalWrite(ledPin, mcp.digitalRead(PORTA, GP_pin_detected));
-                tempoLed = true;
-                previousMillisLed = currentMillis;
-                digitalWrite(ledFlashPin, HIGH);
-            }
-
-            // Si interruption détectée sur le port B
-            if (localFlagPortB) {
-                int8_t GP_pin_detected = mcp.getInterruptPin(PORTB);
-                String interruptMessage = "GPIO" + String(GP_pin_detected + 8) + " detected, delay : " + String(micros() - localFlagPortB) + " us";
-                transfer_message(interruptMessage);
-                DEBUG_PRINTLN(interruptMessage);
-
-                digitalWrite(ledPin, mcp.digitalRead(PORTB, GP_pin_detected));
-                tempoLed = true;
-                previousMillisLed = currentMillis;
-                digitalWrite(ledFlashPin, HIGH);
-            }
+            handleClientAndInterrupts(true, i);
         }
 
         // Déconnexion du client
@@ -202,56 +218,9 @@ void loop() {
     } else {
         DEBUG_PRINTLN("Sans client");
 
-        unsigned long previousMillis = 0;
-        unsigned long previousMillisLed = 0;
-        const unsigned int interval = 1000;  // Intervalle de 1 seconde
-
+        // Tant qu'il n'y a pas de client, on ne gère pas le transfert de message sur le serveur
         while (!client) {
-            unsigned long currentMillis = millis();
-            static bool tempoLed = false;
-
-            // Refresh tous les intervalles de temps
-            if (currentMillis - previousMillis >= interval) {
-                previousMillis = currentMillis;
-
-                mcp.read8(MCP23017_INTCAPA); // Lecture du registre d'interruption pour réinitialiser l'interruption sur le port A
-                mcp.read8(MCP23017_INTCAPB); // Port B
-            }
-
-            // LED allumée pendant 1 seconde si une interruption est détectée
-            if (tempoLed && currentMillis - previousMillisLed >= interval) {
-                digitalWrite(ledFlashPin, LOW);
-                tempoLed = false;
-            }
-
-            // Section critique pour vérifier et réinitialiser les interruptions
-            noInterrupts();  // Désactiver les interruptions
-            unsigned long localFlagPortA = interruptFlagPortA;
-            unsigned long localFlagPortB = interruptFlagPortB;
-            interruptFlagPortA = 0;  // Réinitialiser les drapeaux dans la section critique
-            interruptFlagPortB = 0;
-            interrupts();  // Réactiver les interruptions
-
-            // Si interruption détectée sur le port A
-            if (localFlagPortA) {
-                int8_t GP_pin_detected = mcp.getInterruptPin(PORTA);
-
-                digitalWrite(ledPin, mcp.digitalRead(PORTA, GP_pin_detected));
-                tempoLed = true;
-                previousMillisLed = currentMillis;
-                digitalWrite(ledFlashPin, HIGH);
-            }
-
-            // Si interruption détectée sur le port B
-            if (localFlagPortB) {
-                int8_t GP_pin_detected = mcp.getInterruptPin(PORTB);
-
-                digitalWrite(ledPin, mcp.digitalRead(PORTB, GP_pin_detected));
-                tempoLed = true;
-                previousMillisLed = currentMillis;
-                digitalWrite(ledFlashPin, HIGH);
-            }
-
+            handleClientAndInterrupts(false, i);
             client = server.available();
         }
     }
