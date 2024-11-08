@@ -34,12 +34,12 @@ const int interruptPinPortB = 19; // Configuration de la broche de détection d'
 const int RPiPin = A8;
 const int FlashAndAlarmPin = A15;
 
-// Délais
-const unsigned long debounceDelay = 50000;          // Délai de détection anti-rebond en microsecondes
-const unsigned int intervalRefresh = 10;            // Intervalle de temps en ms pour l'actualisation du pin INT du MCP (pb lié aux interruptions avec l'I2C)
-const unsigned int intervalKeepAlive = 1000;        // Intervalle de temps en ms pour envoyer le message "Keep ALIVE" au client pour vérifier continuellement l'état de la connection Ethernet
-const unsigned int intervalRPi = 1;                 // Intervalle de temps en ms pour la largeur d'impulsion envoyé au serveur RPi (mode deprecated)
-const unsigned int intervalFlashAndAlarm = 1000;    // Intervalle de temps en ms pour ne pas avoir une impulsion sur les signaux visuel et auditif
+// Délais en microsecondes
+const unsigned long debounceDelay = 50000;           // Délai de détection anti-rebond
+const unsigned long intervalRefresh = 10000;         // Intervalle de temps pour l'actualisation du pin INT du MCP (pb lié aux interruptions avec l'I2C)
+const unsigned long intervalKeepAlive = 1000000;     // Intervalle de temps pour envoyer le message "Keep ALIVE" au client pour vérifier continuellement l'état de la connection Ethernet
+const unsigned long intervalRPi = 1000;              // Intervalle de temps pour la largeur d'impulsion envoyé au serveur RPi (mode deprecated)
+const unsigned long intervalFlashAndAlarm = 1000000; // Intervalle de temps pour ne pas avoir une impulsion sur les signaux visuel et auditif
 
 // Flags pour indiquer un changement contenant la date de l'interruption
 volatile unsigned long interruptFlagPortA = 0; // Port A
@@ -138,43 +138,13 @@ void transfer_message (const String msg) {
 
 // Fonction pour gérer l'activité client
 void handleClientAndInterrupts (const bool hasClient, unsigned long &i) {
-    unsigned long currentMillis = millis();
-    static unsigned long previousMillisRefresh = 0;
-    static unsigned long previousMillisKeepAlive = 0;
-    static unsigned long previousMillisRPi = 0;
-    static unsigned long previousMillisFlashAndAlarm = 0;
+    unsigned long currentMicros = micros();
+    static unsigned long previousMicrosRefresh = 0;
+    static unsigned long previousMicrosKeepAlive = 0;
+    static unsigned long previousMicrosRPi = 0;
+    static unsigned long previousMicrosFlashAndAlarm = 0;
     static bool tempoLed = false;
     static bool tempoRPi = false;
-
-    // Envoi du message "Keep alive"
-    if (hasClient && currentMillis - previousMillisKeepAlive >= intervalKeepAlive) {
-        previousMillisKeepAlive = currentMillis;
-
-        ++i;
-        String message = "Keep ALIVE " + String(i) + "\t\t";
-        transfer_message(message);
-        DEBUG_PRINTLN(message);
-    }
-
-    // Flash et Alarme allumés pendant l'intervalle défini si une interruption est détectée
-    if (tempoLed && currentMillis - previousMillisFlashAndAlarm >= intervalFlashAndAlarm) {
-        digitalWrite(FlashAndAlarmPin, LOW);
-        tempoLed = false;
-    }
-
-    // Impulsion de l'intervalle défini pour le pin du serveur RPi (mode deprecated)
-    if (tempoRPi && currentMillis - previousMillisRPi >= intervalRPi) {
-        digitalWrite(RPiPin, LOW);
-        tempoRPi = false;
-    }
-
-    // Refresh tous les intervalles de temps le pin INT du composant MCP23017 (pb lié aux interruptions et à l'I2C sur Arduino)
-    if (currentMillis - previousMillisRefresh >= intervalRefresh) {
-        previousMillisRefresh = currentMillis;
-
-        mcp.read8(MCP23017_INTCAPA); // Lecture du registre d'interruption pour réinitialiser l'interruption sur le port A
-        mcp.read8(MCP23017_INTCAPB); // Port B
-    }
 
     // Section critique pour vérifier et réinitialiser les interruptions
     noInterrupts();  // Désactiver les interruptions
@@ -187,35 +157,69 @@ void handleClientAndInterrupts (const bool hasClient, unsigned long &i) {
     // Gestion des interruptions sur le port A
     if (localFlagPortA) {
         int8_t GP_pin_detected = mcp.getInterruptPin(PORTA);
-        if (hasClient) {
-            String interruptMessage = "GPIO" + String(GP_pin_detected) + " detected, delay : " + String(micros() - localFlagPortA) + " us";
-            transfer_message(interruptMessage);
-            DEBUG_PRINTLN(interruptMessage);
-        }
+        if (!mcp.isRisingEdge(PORTA, GP_pin_detected)) {
+            if (hasClient) {
+                String interruptMessage = "GPIO" + String(GP_pin_detected) + " detected, delay : " + String(micros() - localFlagPortA) + " us";
+                transfer_message(interruptMessage);
+                DEBUG_PRINTLN(interruptMessage);
+            }
 
-        tempoLed = true;
-        tempoRPi = true;
-        previousMillisFlashAndAlarm = currentMillis;
-        previousMillisRPi = currentMillis;
-        digitalWrite(FlashAndAlarmPin, HIGH);
-        digitalWrite(RPiPin, HIGH);
+            tempoLed = true;
+            tempoRPi = true;
+            previousMicrosFlashAndAlarm = currentMicros;
+            previousMicrosRPi = currentMicros;
+            digitalWrite(FlashAndAlarmPin, HIGH);
+            digitalWrite(RPiPin, HIGH);
+        }       
     }
 
     // Gestion des interruptions sur le port B
     if (localFlagPortB) {
         int8_t GP_pin_detected = mcp.getInterruptPin(PORTB);
-        if (hasClient) {
-            String interruptMessage = "GPIO" + String(GP_pin_detected + 8) + " detected, delay : " + String(micros() - localFlagPortB) + " us";
-            transfer_message(interruptMessage);
-            DEBUG_PRINTLN(interruptMessage);
-        }
+        if (!mcp.isRisingEdge(PORTB, GP_pin_detected)) {
+            if (hasClient) {
+                String interruptMessage = "GPIO" + String(GP_pin_detected + 8) + " detected, delay : " + String(micros() - localFlagPortB) + " us";
+                transfer_message(interruptMessage);
+                DEBUG_PRINTLN(interruptMessage);
+            }
 
-        tempoLed = true;
-        tempoRPi = true;
-        previousMillisFlashAndAlarm = currentMillis;
-        previousMillisRPi = currentMillis;
-        digitalWrite(FlashAndAlarmPin, HIGH);
-        digitalWrite(RPiPin, HIGH);
+            tempoLed = true;
+            tempoRPi = true;
+            previousMicrosFlashAndAlarm = currentMicros;
+            previousMicrosRPi = currentMicros;
+            digitalWrite(FlashAndAlarmPin, HIGH);
+            digitalWrite(RPiPin, HIGH);
+        }
+    }
+
+    // Envoi du message "Keep alive"
+    if (hasClient && currentMicros - previousMicrosKeepAlive >= intervalKeepAlive) {
+        previousMicrosKeepAlive = currentMicros;
+
+        ++i;
+        String message = "Keep ALIVE " + String(i) + "\t\t";
+        transfer_message(message);
+        DEBUG_PRINTLN(message);
+    }
+
+    // Flash et Alarme allumés pendant l'intervalle défini si une interruption est détectée
+    if (tempoLed && currentMicros - previousMicrosFlashAndAlarm >= intervalFlashAndAlarm) {
+        digitalWrite(FlashAndAlarmPin, LOW);
+        tempoLed = false;
+    }
+
+    // Impulsion de l'intervalle défini pour le pin du serveur RPi (mode deprecated)
+    if (tempoRPi && currentMicros - previousMicrosRPi >= intervalRPi) {
+        digitalWrite(RPiPin, LOW);
+        tempoRPi = false;
+    }
+
+    // Refresh tous les intervalles de temps le pin INT du composant MCP23017 (pb lié aux interruptions et à l'I2C sur Arduino)
+    if (currentMicros - previousMicrosRefresh >= intervalRefresh) {
+        previousMicrosRefresh = currentMicros;
+
+        mcp.read8(MCP23017_INTCAPA); // Lecture du registre d'interruption pour réinitialiser l'interruption sur le port A
+        mcp.read8(MCP23017_INTCAPB); // Port B
     }
 }
 

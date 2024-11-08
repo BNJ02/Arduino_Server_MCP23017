@@ -112,22 +112,23 @@ bool MCP23017::enableInterrupt(uint8_t port, uint8_t pin, bool enable, uint8_t m
     return success;
 }
 
-// Savoir quelle broche a déclenché l'interruption
+// Retourne le numéro de la broche qui a déclenché l'interruption sur le port donné
 int8_t MCP23017::getInterruptPin(uint8_t port) {
-    if (port > 1) return -1; // MCP23017 gère que 2 ports
+    if (port > 1) return -1; // MCP23017 gère uniquement 2 ports (A et B)
 
-    uint8_t intf = read8(MCP23017_INTFA + port); // Lire le registre INTF pour voir quelle broche a déclenché l'interruption
-    read8(MCP23017_INTCAPA + port); // Lecture du registre d'interruption pour réinitialiser l'interruption
+    uint8_t intf = read8(MCP23017_INTFA + port); // Lire le registre INTF pour savoir quelle broche a déclenché
     for (uint8_t pin = 0; pin < 8; pin++) {
         if (intf & (1 << pin)) {
-            return pin; // Retourner la première broche ayant déclenché l'interruption
+            return pin; // Retourner le premier pin ayant déclenché l'interruption
         }
     }
-    return -1; // Retourne -1 si aucune broche n'a déclenché d'interruption
+    return -1; // Retourne -1 si aucune broche n'a déclenché
 }
 
-// Lire l'état de la broche au moment de l'interruption
-uint8_t MCP23017::getInterruptPinValue(uint8_t port) {
-    return read8(MCP23017_INTCAPA + port); // Lire l'état capturé au moment de l'interruption
-}
+// Retourne true si l'interruption était un front montant (rising edge), false si c'était un front descendant (falling edge)
+bool MCP23017::isRisingEdge(uint8_t port, uint8_t pin) {
+    if (pin > 7 || port > 1) return false;
 
+    uint8_t intcap = read8(MCP23017_INTCAPA + port); // Lire l'état de la broche au moment de l'interruption
+    return (intcap & (1 << pin)); // Retourne true si INTCAP est bas (0), indiquant un front montant
+}

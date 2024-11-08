@@ -45,7 +45,7 @@ class MCP23017 {
         // Interrupts
         bool enableInterrupt(uint8_t port, uint8_t pin, bool enable, uint8_t mode);
         int8_t getInterruptPin(uint8_t port);
-        uint8_t getInterruptPinValue(uint8_t port);
+        bool isRisingEdge(uint8_t port, uint8_t pin);
         
         // Low-level access
         uint8_t read8(uint8_t addr);
