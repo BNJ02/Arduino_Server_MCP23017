@@ -60,7 +60,7 @@ def listen_to_arduino_server(client_socket, shared_data, mutex):
 # Point d'entrée du programme
 if __name__ == "__main__":
     # Paramètres de connexion
-    arduino_ip = "192.168.1.177"
+    arduino_ip = "192.168.0.3"
     arduino_port = 80
 
     # Se connecter au serveur Arduino
